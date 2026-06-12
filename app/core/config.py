@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""
     langsmith_project: str = "equity-research-agent"
+    # Endpoint regionu. Konta z UE używają endpointu EU — inaczej API zwraca 403.
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     # --- RAG / pgvector (ETAP 3) ---
     # Domyślnie localhost (wygodne przy uruchamianiu skryptów z hosta).

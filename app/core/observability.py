@@ -33,8 +33,10 @@ def setup_observability(settings: Settings) -> bool:
     os.environ["LANGSMITH_TRACING"] = "true"
     os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
+    os.environ["LANGSMITH_ENDPOINT"] = settings.langsmith_endpoint
     # Starsze nazwy (LANGCHAIN_*) dla kompatybilności wstecznej bibliotek.
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
+    os.environ["LANGCHAIN_ENDPOINT"] = settings.langsmith_endpoint
     return True
