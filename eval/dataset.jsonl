@@ -1,1 +1,12 @@
-{"_comment": "ETAP 4: 10-15 przypadków testowych (różne tickery, oczekiwane cechy dobrego raportu). Ten plik to placeholder."}
+{"ticker": "AAPL", "segment": "large-cap tech", "expect": "metryki obecne, news dostępne, ostrożny ton"}
+{"ticker": "MSFT", "segment": "large-cap tech", "expect": "momentum i upside policzone, disclaimer obecny"}
+{"ticker": "NVDA", "segment": "large-cap semi", "expect": "silne momentum, ryzyka branżowe wymienione"}
+{"ticker": "KO", "segment": "large-cap defensywna", "expect": "niskie momentum możliwe, stabilny profil"}
+{"ticker": "JPM", "segment": "bank", "expect": "ryzyka regulacyjne/stóp procentowych w analizie"}
+{"ticker": "XOM", "segment": "energia", "expect": "wrażliwość na ceny surowców jako ryzyko"}
+{"ticker": "TSLA", "segment": "large-cap auto/tech", "expect": "wysoka zmienność, ryzyka konkurencji"}
+{"ticker": "AMZN", "segment": "large-cap e-commerce", "expect": "metryki obecne, ton ostrożny"}
+{"ticker": "GOOGL", "segment": "large-cap tech", "expect": "ryzyka regulacyjne/antymonopolowe sensowne"}
+{"ticker": "PFE", "segment": "farmacja", "expect": "ryzyka pipeline/patentów możliwe"}
+{"ticker": "WMT", "segment": "retail defensywny", "expect": "stabilny profil, niska zmienność"}
+{"ticker": "DIS", "segment": "media", "expect": "metryki obecne, disclaimer obecny"}

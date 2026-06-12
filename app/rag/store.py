@@ -120,4 +120,7 @@ class VectorStore:
                 """,
                 (query_embedding, ticker, k),
             )
-            return [SearchHit(content=r[0], source=r[1], distance=float(r[2])) for r in cur.fetchall()]
+            return [
+                SearchHit(content=r[0], source=r[1], distance=float(r[2]))
+                for r in cur.fetchall()
+            ]

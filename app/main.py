@@ -7,8 +7,10 @@ Graf budujemy RAZ przy starcie (trzyma wstrzykniętego klienta LLM), a każde
 
 from __future__ import annotations
 
+import re
+
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.graph import build_graph
 from app.agent.state import Report
@@ -39,8 +41,23 @@ _agent = build_graph(
 )
 
 
+# Dozwolony format tickera: litery/cyfry + kropka/myślnik (np. BRK.B, RDS-A), do 10 znaków.
+# Walidacja na wejściu zawęża, co trafia dalej do yfinance, bazy i promptu LLM.
+_TICKER_RE = re.compile(r"^[A-Za-z0-9.\-]{1,10}$")
+
+
 class AnalyzeRequest(BaseModel):
     ticker: str = Field(..., examples=["AAPL"], description="Symbol spółki, np. AAPL.")
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        v = v.strip()
+        if not _TICKER_RE.match(v):
+            raise ValueError(
+                "Nieprawidłowy ticker (dozwolone: litery, cyfry, '.', '-', do 10 znaków)."
+            )
+        return v.upper()
 
 
 @app.get("/health")
