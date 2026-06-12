@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.agent.graph import build_graph
 from app.agent.state import Report
 from app.core.config import get_settings
+from app.core.observability import setup_observability
 from app.llm.client import get_llm_client
 from app.rag.embeddings import get_embedder
 from app.rag.store import VectorStore
@@ -26,6 +27,11 @@ app = FastAPI(
 # Budujemy agenta raz na proces. Zależności wybierane z .env; fabryki schodzą
 # do atrap (brak klucza LLM / brak modelu embeddingów), więc aplikacja zawsze wstaje.
 _settings = get_settings()
+
+# Trace przepływu (LangSmith) — aktywny tylko z flagą + kluczem. Musi być PRZED
+# zbudowaniem grafu, bo to moment, w którym LangGraph podpina callbacki tracingu.
+TRACING_ENABLED = setup_observability(_settings)
+
 _agent = build_graph(
     llm=get_llm_client(_settings),
     store=VectorStore(_settings.database_url),
@@ -38,9 +44,9 @@ class AnalyzeRequest(BaseModel):
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    """Liveness probe."""
-    return {"status": "ok"}
+def health() -> dict[str, object]:
+    """Liveness probe. Pokazuje też, czy trace LangSmith jest aktywny."""
+    return {"status": "ok", "tracing": TRACING_ENABLED}
 
 
 @app.post("/analyze", response_model=Report)
