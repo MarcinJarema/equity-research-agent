@@ -1,0 +1,68 @@
+[project]
+name = "equity-research-agent"
+version = "0.1.0"
+description = "Agentowy system analizy spółek giełdowych oparty o LLM (LangGraph + FastAPI + RAG)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# Zależności podstawowe (runtime).
+# Świadomie trzymamy się stacku z planu — nic spoza niego bez decyzji.
+dependencies = [
+    # --- API ---
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    # --- Konfiguracja / walidacja ---
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    # --- Orkiestracja agenta (cel edukacyjny projektu) ---
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    # --- Dane rynkowe ---
+    "yfinance>=0.2.40",
+    # --- LLM: domyślnie Groq, wymienne (abstrakcja LLMClient) ---
+    "groq>=0.11",
+    # --- Observability ---
+    "langsmith>=0.1",
+    # --- HTTP / utils ---
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Dostawcy LLM "na zapas" — abstrakcja LLMClient ma być wymienna.
+# Instalujemy tylko gdy potrzebne, żeby nie puchł obraz Dockera.
+llm = [
+    "openai>=1.30",
+    "anthropic>=0.34",
+]
+# Warstwa RAG (ETAP 3) — pgvector na PostgreSQL.
+rag = [
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.3",
+    "sentence-transformers>=3.0",
+]
+# Narzędzia deweloperskie.
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Sensowny zestaw startowy: błędy, pyflakes, isort, bugbear, upgrade.
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
