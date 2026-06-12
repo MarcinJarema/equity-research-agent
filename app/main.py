@@ -69,9 +69,17 @@ def health() -> dict[str, object]:
 @app.post("/analyze", response_model=Report)
 def analyze(req: AnalyzeRequest) -> Report:
     """Uruchamia agenta na podanym tickerze i zwraca ustrukturyzowany raport."""
-    result = _agent.invoke({"ticker": req.ticker})
+    try:
+        result = _agent.invoke({"ticker": req.ticker})
+    except Exception as exc:
+        # Nieoczekiwany błąd w którymś węźle (yfinance, LLM, baza) — nie wyciekamy
+        # stack trace'a; zwracamy czytelny 502 (błąd źródła danych/LLM).
+        raise HTTPException(status_code=502, detail=f"Błąd podczas analizy: {exc}") from exc
 
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
 
-    return result["report"]
+    report = result.get("report")
+    if report is None:
+        raise HTTPException(status_code=502, detail="Agent nie zwrócił raportu.")
+    return report

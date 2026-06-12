@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import yfinance as yf
 from pydantic import BaseModel
 
@@ -59,6 +60,9 @@ def get_market_data(ticker: str, *, period: str = "14mo") -> MarketData:
     # history() zwraca DataFrame z kolumną 'Close'. auto_adjust=True => ceny
     # skorygowane o splity/dywidendy, co jest poprawne do liczenia momentum.
     hist = tk.history(period=period, auto_adjust=True)
+    # Odrzucamy wiersze bez ceny zamknięcia (niedomknięty bieżący dzień bywa NaN) —
+    # NaN zepsułby cenę bieżącą i metryki, a w JSON to nieprawidłowy token.
+    hist = hist.dropna(subset=["Close"])
     if hist.empty:
         raise MarketDataError(f"Brak danych historycznych dla tickera '{ticker}'.")
 
@@ -70,13 +74,14 @@ def get_market_data(ticker: str, *, period: str = "14mo") -> MarketData:
     # .info bywa wolne i czasem niekompletne — czytamy ostrożnie, z fallbackami.
     info = _safe_info(tk)
     current_price = float(history[-1].close)  # ostatnie zamknięcie jako bieżąca cena
-    last_volume = history and hist["Volume"].iloc[-1]
+    last_volume = hist["Volume"].iloc[-1]
 
     return MarketData(
         ticker=ticker,
         currency=info.get("currency"),
         current_price=current_price,
-        volume=int(last_volume) if last_volume else None,
+        # pd.notna: NaN -> None (brak danych), ale wolumen 0 traktujemy jako prawdziwe 0.
+        volume=int(last_volume) if pd.notna(last_volume) else None,
         target_mean_price=_as_float(info.get("targetMeanPrice")),
         history=history,
     )

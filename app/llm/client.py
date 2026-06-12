@@ -49,8 +49,15 @@ class GroqClient(LLMClient):
             response_format={"type": "json_object"},
             max_tokens=self._max_tokens,      # twardy limit kosztów
             temperature=self._temperature,    # niska => stabilniejszy, mniej "kreatywny"
+            timeout=30.0,                      # nie wieszamy workera na zawieszonym połączeniu
         )
-        return json.loads(resp.choices[0].message.content)
+        content = resp.choices[0].message.content
+        if not content:
+            return {}  # pusta odpowiedź modelu — synteza użyje wartości domyślnych
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"LLM zwrócił niepoprawny JSON: {content[:200]!r}") from exc
 
 
 class FakeLLMClient(LLMClient):

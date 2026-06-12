@@ -57,6 +57,14 @@ def deterministic_checks(report: Report) -> dict:
     }
 
 
+def _as_int(value, default: int = 0) -> int:
+    """Sędzia (LLM) bywa nieprzewidywalny — nie wywalamy całego runu na złym typie oceny."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def judge(llm: LLMClient, report: Report) -> dict:
     """LLM-as-judge: ocena jakościowa raportu względem metryk referencyjnych."""
     payload = {
@@ -72,8 +80,8 @@ def judge(llm: LLMClient, report: Report) -> dict:
     }
     raw = llm.complete_json(JUDGE_SYSTEM, json.dumps(payload, ensure_ascii=False))
     return {
-        "relevance": int(raw.get("relevance", 0)),
-        "completeness": int(raw.get("completeness", 0)),
+        "relevance": _as_int(raw.get("relevance")),
+        "completeness": _as_int(raw.get("completeness")),
         "no_number_hallucination": bool(raw.get("no_number_hallucination", False)),
         "comment": str(raw.get("comment", "")),
     }
