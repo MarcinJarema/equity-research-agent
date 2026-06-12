@@ -90,9 +90,10 @@ def judge(llm: LLMClient, report: Report) -> dict:
 def main() -> None:
     settings = get_settings()
     llm = get_llm_client(settings)
+    store = VectorStore(settings.database_url)
     agent = build_graph(
         llm=llm,
-        store=VectorStore(settings.database_url),
+        store=store,
         embedder=get_embedder(settings.embed_provider),
     )
 
@@ -101,34 +102,38 @@ def main() -> None:
     print(f"Ewaluacja {len(cases)} przypadków (sędzia: {judge_id})\n")
 
     scores: list[float] = []
-    for case in cases:
-        ticker = case["ticker"]
-        result = agent.invoke({"ticker": ticker})
+    try:
+        for case in cases:
+            ticker = case["ticker"]
+            result = agent.invoke({"ticker": ticker})
 
-        if result.get("error") or "report" not in result:
-            print(f"  {ticker:6} | BŁĄD: {result.get('error', 'brak raportu')}")
-            scores.append(0.0)
-            continue
+            if result.get("error") or "report" not in result:
+                print(f"  {ticker:6} | BŁĄD: {result.get('error', 'brak raportu')}")
+                scores.append(0.0)
+                continue
 
-        report: Report = result["report"]
-        det = deterministic_checks(report)
-        jud = judge(llm, report)
+            report: Report = result["report"]
+            det = deterministic_checks(report)
+            jud = judge(llm, report)
 
-        # Wynik łączny: średnia ocen LLM (skala 0-1) z karami za braki deterministyczne.
-        quality = (jud["relevance"] + jud["completeness"]) / 10.0  # 0..1
-        if not jud["no_number_hallucination"]:
-            quality *= 0.5  # halucynacja liczb to poważny błąd
-        if not all(det.values()):
-            quality *= 0.5  # brak disclaimera/metryk/rekomendacji
-        scores.append(quality)
+            # Wynik łączny: średnia ocen LLM (0-1) z karami za braki deterministyczne.
+            quality = (jud["relevance"] + jud["completeness"]) / 10.0  # 0..1
+            if not jud["no_number_hallucination"]:
+                quality *= 0.5  # halucynacja liczb to poważny błąd
+            if not all(det.values()):
+                quality *= 0.5  # brak disclaimera/metryk/rekomendacji
+            scores.append(quality)
 
-        flags = "".join(
-            "✓" if v else "✗" for v in (det["has_disclaimer"], jud["no_number_hallucination"])
-        )
-        print(
-            f"  {ticker:6} | jakość={quality:.2f} | rel={jud['relevance']} "
-            f"comp={jud['completeness']} | disc/no-halu={flags} | {jud['comment'][:60]}"
-        )
+            flags = "".join(
+                "✓" if v else "✗"
+                for v in (det["has_disclaimer"], jud["no_number_hallucination"])
+            )
+            print(
+                f"  {ticker:6} | jakość={quality:.2f} | rel={jud['relevance']} "
+                f"comp={jud['completeness']} | disc/no-halu={flags} | {jud['comment'][:60]}"
+            )
+    finally:
+        store.close()  # zamknij pulę (wątek tła) przed wyjściem
 
     if scores:
         print(f"\nŚrednia jakość: {sum(scores) / len(scores):.2f} (0-1), n={len(scores)}")

@@ -7,8 +7,12 @@ yfinance, więc parsujemy ją obronnie.
 
 from __future__ import annotations
 
+import logging
+
 import yfinance as yf
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class NewsItem(BaseModel):
@@ -22,7 +26,8 @@ def get_news(ticker: str, *, limit: int = 8) -> list[NewsItem]:
     ticker = ticker.strip().upper()
     try:
         raw = yf.Ticker(ticker).news or []
-    except Exception:
+    except Exception as exc:
+        logger.warning("get_news(%s) nieudane, zwracam pustą listę: %s", ticker, exc)
         return []
 
     items: list[NewsItem] = []

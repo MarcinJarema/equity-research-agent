@@ -84,7 +84,8 @@ def build_chunks(ticker: str, embedder: Embedder) -> list[Chunk]:
 
 def ingest_ticker(ticker: str, store: VectorStore, embedder: Embedder) -> int:
     """Pełny ingest dla tickera: schemat -> chunki -> zapis. Zwraca liczbę chunków."""
-    store.init_schema()
+    # Wymiar tabeli bierzemy z embeddera => tabela zawsze pasuje do modelu.
+    store.init_schema(embedder.dim)
     chunks = build_chunks(ticker, embedder)
     return store.add_chunks(chunks)
 
@@ -105,9 +106,12 @@ def _main() -> None:
     store = VectorStore(settings.database_url)
     embedder = get_embedder(settings.embed_provider)
 
-    for ticker in tickers:
-        n = ingest_ticker(ticker, store, embedder)
-        print(f"{ticker}: zapisano {n} chunków.")
+    try:
+        for ticker in tickers:
+            n = ingest_ticker(ticker, store, embedder)
+            print(f"{ticker}: zapisano {n} chunków.")
+    finally:
+        store.close()  # zamknij pulę (wątek tła) przed wyjściem
 
 
 if __name__ == "__main__":

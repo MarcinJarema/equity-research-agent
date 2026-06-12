@@ -8,6 +8,7 @@ Graf budujemy RAZ przy starcie (trzyma wstrzykniętego klienta LLM), a każde
 from __future__ import annotations
 
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -20,12 +21,6 @@ from app.llm.client import get_llm_client
 from app.rag.embeddings import get_embedder
 from app.rag.store import VectorStore
 
-app = FastAPI(
-    title="Equity Research Agent",
-    description="Agentowy system analizy spółek giełdowych (LangGraph + tool-calling).",
-    version="0.2.0",
-)
-
 # Budujemy agenta raz na proces. Zależności wybierane z .env; fabryki schodzą
 # do atrap (brak klucza LLM / brak modelu embeddingów), więc aplikacja zawsze wstaje.
 _settings = get_settings()
@@ -34,10 +29,26 @@ _settings = get_settings()
 # zbudowaniem grafu, bo to moment, w którym LangGraph podpina callbacki tracingu.
 TRACING_ENABLED = setup_observability(_settings)
 
+_store = VectorStore(_settings.database_url)
 _agent = build_graph(
     llm=get_llm_client(_settings),
-    store=VectorStore(_settings.database_url),
+    store=_store,
     embedder=get_embedder(_settings.embed_provider),
+)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Cykl życia aplikacji — przy zatrzymaniu zamykamy pulę połączeń."""
+    yield
+    _store.close()
+
+
+app = FastAPI(
+    title="Equity Research Agent",
+    description="Agentowy system analizy spółek giełdowych (LangGraph + tool-calling).",
+    version="0.3.0",
+    lifespan=_lifespan,
 )
 
 

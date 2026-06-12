@@ -38,6 +38,7 @@ llm = [
 # Warstwa RAG (ETAP 3) — pgvector na PostgreSQL.
 rag = [
     "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
     "pgvector>=0.3",
     "sentence-transformers>=3.0",
 ]

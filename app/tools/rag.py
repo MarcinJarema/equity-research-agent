@@ -6,8 +6,12 @@ gdy w bazie jest już zingestowany kontekst dla danego tickera (patrz router).
 
 from __future__ import annotations
 
+import logging
+
 from app.rag.embeddings import Embedder
 from app.rag.store import VectorStore
+
+logger = logging.getLogger(__name__)
 
 
 def rag_search(
@@ -26,5 +30,6 @@ def rag_search(
         query_vec = embedder.embed([query])[0]
         hits = store.search(ticker.upper(), query_vec, k=k)
         return [h.content for h in hits]
-    except Exception:
+    except Exception as exc:
+        logger.warning("rag_search(%s) nieudane, kontynuuję bez RAG: %s", ticker, exc)
         return []

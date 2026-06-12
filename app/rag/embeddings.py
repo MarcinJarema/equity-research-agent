@@ -1,20 +1,26 @@
 """Embeddingi: zamiana tekstu na wektory.
 
 Abstrakcja Embedder (jak LLMClient) — niezależność i testowalność:
-  • SentenceTransformerEmbedder — prawdziwy model lokalny (offline, bez kosztów API),
+  • SentenceTransformerEmbedder — prawdziwy model lokalny (offline, bez kosztów API);
+    model ładowany LENIWIE przy pierwszym użyciu, żeby nie blokować startu aplikacji,
   • FakeEmbedder — deterministyczna atrapa do testów, bez pobierania modelu.
 
-WAŻNE: oba embeddery produkują wektor o tym samym wymiarze (EMBED_DIM),
-żeby schemat tabeli w pgvector (vector(EMBED_DIM)) pasował niezależnie od wyboru.
+Wymiar wektora bierzemy z faktycznego embeddera (Embedder.dim), a nie ze stałej —
+dzięki temu tabela w pgvector ma wymiar zgodny z modelem, niezależnie od wyboru.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import logging
 import math
 from abc import ABC, abstractmethod
 
-# Wymiar wektora. 384 = wymiar all-MiniLM-L6-v2 (mały, szybki, dobry domyślny model).
+logger = logging.getLogger(__name__)
+
+# Wymiar atrapy = wymiar all-MiniLM-L6-v2 (mały, szybki, dobry domyślny model),
+# żeby przełączenie fake <-> realny model nie zmieniało schematu tabeli.
 EMBED_DIM = 384
 
 # Domyślny model lokalny. Mały (~80 MB), szybki, sensowna jakość do newsów.
@@ -24,7 +30,11 @@ DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 class Embedder(ABC):
     """Wspólny interfejs embeddera."""
 
-    dim: int = EMBED_DIM
+    @property
+    @abstractmethod
+    def dim(self) -> int:
+        """Wymiar zwracanych wektorów (do schematu tabeli pgvector)."""
+        ...
 
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -33,18 +43,27 @@ class Embedder(ABC):
 
 
 class SentenceTransformerEmbedder(Embedder):
-    """Lokalny model z biblioteki sentence-transformers."""
+    """Lokalny model z biblioteki sentence-transformers (ładowany leniwie)."""
 
     def __init__(self, model_name: str = DEFAULT_MODEL):
-        # Import i załadowanie modelu leniwie — biblioteka jest ciężka (torch),
-        # nie chcemy jej wymagać, gdy używamy atrapy.
-        from sentence_transformers import SentenceTransformer
+        self._model_name = model_name
+        self._model = None  # ładowane przy pierwszym użyciu (_ensure)
 
-        self._model = SentenceTransformer(model_name)
-        self.dim = self._model.get_sentence_embedding_dimension()
+    def _ensure(self):
+        if self._model is None:
+            # Import i załadowanie modelu dopiero teraz — biblioteka jest ciężka (torch).
+            from sentence_transformers import SentenceTransformer
+
+            logger.info("Ładuję model embeddingów: %s", self._model_name)
+            self._model = SentenceTransformer(self._model_name)
+        return self._model
+
+    @property
+    def dim(self) -> int:
+        return self._ensure().get_sentence_embedding_dimension()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        vectors = self._model.encode(texts, normalize_embeddings=True)
+        vectors = self._ensure().encode(texts, normalize_embeddings=True)
         return [v.tolist() for v in vectors]
 
 
@@ -54,6 +73,10 @@ class FakeEmbedder(Embedder):
     Nie oddaje znaczenia semantycznego, ale jest STABILNA i bez zależności —
     pozwala przetestować cały tor RAG (ingest -> pgvector -> search) bez torcha.
     """
+
+    @property
+    def dim(self) -> int:
+        return EMBED_DIM
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._hash_vector(t) for t in texts]
@@ -69,12 +92,15 @@ class FakeEmbedder(Embedder):
 def get_embedder(provider: str = "sentence-transformers") -> Embedder:
     """Fabryka embeddera wg konfiguracji.
 
-    "fake" => atrapa. W przeciwnym razie próbujemy modelu lokalnego, a gdy
-    biblioteka/torch są niedostępne, schodzimy do atrapy zamiast wywalać start.
+    "fake" => atrapa. W przeciwnym razie używamy modelu lokalnego, ale tylko gdy
+    biblioteka jest zainstalowana (sprawdzamy TANIO, bez ładowania modelu); inaczej
+    logujemy i schodzimy do atrapy zamiast wywalać aplikację.
     """
     if provider == "fake":
         return FakeEmbedder()
-    try:
-        return SentenceTransformerEmbedder()
-    except ImportError:
+    if importlib.util.find_spec("sentence_transformers") is None:
+        logger.warning(
+            "Brak sentence-transformers — używam FakeEmbedder (RAG bez znaczenia semantycznego)."
+        )
         return FakeEmbedder()
+    return SentenceTransformerEmbedder()
