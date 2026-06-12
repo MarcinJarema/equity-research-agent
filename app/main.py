@@ -14,6 +14,8 @@ from app.agent.graph import build_graph
 from app.agent.state import Report
 from app.core.config import get_settings
 from app.llm.client import get_llm_client
+from app.rag.embeddings import get_embedder
+from app.rag.store import VectorStore
 
 app = FastAPI(
     title="Equity Research Agent",
@@ -21,10 +23,14 @@ app = FastAPI(
     version="0.2.0",
 )
 
-# Budujemy agenta raz na proces. get_llm_client wybiera dostawcę z .env
-# i schodzi do atrapy, gdy brak klucza — aplikacja zawsze wstaje.
+# Budujemy agenta raz na proces. Zależności wybierane z .env; fabryki schodzą
+# do atrap (brak klucza LLM / brak modelu embeddingów), więc aplikacja zawsze wstaje.
 _settings = get_settings()
-_agent = build_graph(get_llm_client(_settings))
+_agent = build_graph(
+    llm=get_llm_client(_settings),
+    store=VectorStore(_settings.database_url),
+    embedder=get_embedder(_settings.embed_provider),
+)
 
 
 class AnalyzeRequest(BaseModel):

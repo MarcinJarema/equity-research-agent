@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     langsmith_project: str = "equity-research-agent"
 
     # --- RAG / pgvector (ETAP 3) ---
-    database_url: str = "postgresql://postgres:postgres@db:5432/equity"
+    # Domyślnie localhost (wygodne przy uruchamianiu skryptów z hosta).
+    # docker-compose nadpisuje host na 'db' dla kontenera aplikacji.
+    database_url: str = "postgresql://postgres:postgres@localhost:5432/equity"
+    # Embedder: "sentence-transformers" (prawdziwy, lokalny) lub "fake" (testy/bez torcha).
+    embed_provider: str = "sentence-transformers"
 
 
 @lru_cache

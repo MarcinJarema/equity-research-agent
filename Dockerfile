@@ -11,7 +11,8 @@ WORKDIR /code
 # dopóki nie zmienisz pyproject.toml (szybsze przebudowy przy zmianach w kodzie).
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN pip install --no-cache-dir .
+# [rag] dokłada psycopg + pgvector + sentence-transformers (RAG to teraz rdzeń).
+RUN pip install --no-cache-dir ".[rag]"
 
 EXPOSE 8000
 

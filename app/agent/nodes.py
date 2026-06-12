@@ -11,26 +11,27 @@ from collections.abc import Callable
 
 from app.agent.state import AgentState, Report
 from app.llm.client import LLMClient
+from app.rag.embeddings import Embedder
+from app.rag.store import VectorStore
 from app.tools.market_data import MarketDataError, get_market_data
 from app.tools.metrics import calc_metrics
+from app.tools.news import get_news
+from app.tools.rag import rag_search
 
 
 def router_node(state: AgentState) -> AgentState:
-    """ROUTER — decyduje, które narzędzia uruchomić.
+    """ROUTER — ustala plan: które narzędzia uruchomić.
 
-    DLACZEGO to osobny węzeł, skoro w MVP zawsze bierzemy te same dane:
-    bo to miejsce decyzji. W ETAPIE 3 dołożymy 'news' i 'rag_search', które są
-    OPCJONALNE — wtedy router (regułowo lub przez LLM) wybierze podzbiór narzędzi.
-    Dziś plan jest stały: dane rynkowe są podstawą każdej analizy spółki.
+    market_data, metrics i news bierzemy zawsze (to podstawa analizy spółki).
+    O RAG decydujemy osobno, bo jest WARUNKOWY — patrz should_use_rag().
     """
-    return {"plan": ["market_data", "metrics"]}
+    return {"plan": ["market_data", "metrics", "news", "rag?"]}
 
 
 def market_data_node(state: AgentState) -> AgentState:
     """Pobiera dane rynkowe dla tickera ze stanu."""
     try:
-        data = get_market_data(state["ticker"])
-        return {"market_data": data}
+        return {"market_data": get_market_data(state["ticker"])}
     except MarketDataError as exc:
         return {"error": str(exc)}
 
@@ -42,12 +43,38 @@ def metrics_node(state: AgentState) -> AgentState:
     return {"metrics": calc_metrics(state["market_data"])}
 
 
-def make_synthesize_node(llm: LLMClient) -> Callable[[AgentState], AgentState]:
-    """Tworzy węzeł synthesize z WSTRZYKNIĘTYM klientem LLM (dependency injection).
+def news_node(state: AgentState) -> AgentState:
+    """Pobiera ostatnie newsy spółki."""
+    return {"news": get_news(state["ticker"])}
 
-    Zwracamy domknięcie, bo węzeł w LangGraph to funkcja (state) -> state,
-    a klient LLM chcemy podać z zewnątrz (prawdziwy w aplikacji, atrapa w testach).
+
+def make_rag_node(store: VectorStore, embedder: Embedder) -> Callable[[AgentState], AgentState]:
+    """Węzeł rag z wstrzykniętym store + embedder (DI, jak przy LLM)."""
+
+    def rag_node(state: AgentState) -> AgentState:
+        ticker = state["ticker"]
+        # Stałe zapytanie analityczne — szukamy kontekstu o perspektywach/ryzykach.
+        query = f"{ticker} perspektywy wzrostu ryzyka wyniki"
+        return {"rag_context": rag_search(ticker, query, store, embedder)}
+
+    return rag_node
+
+
+def make_should_use_rag(store: VectorStore) -> Callable[[AgentState], str]:
+    """Funkcja decyzyjna conditional edge: włączyć RAG czy iść prosto do syntezy.
+
+    To REALNA decyzja agenta oparta o stan świata: jeśli w bazie jest kontekst
+    dla tego tickera -> 'rag', w przeciwnym razie -> 'synthesize'.
     """
+
+    def should_use_rag(state: AgentState) -> str:
+        return "rag" if store.has_documents(state["ticker"]) else "synthesize"
+
+    return should_use_rag
+
+
+def make_synthesize_node(llm: LLMClient) -> Callable[[AgentState], AgentState]:
+    """Tworzy węzeł synthesize z WSTRZYKNIĘTYM klientem LLM (dependency injection)."""
 
     def synthesize_node(state: AgentState) -> AgentState:
         if "error" in state:
@@ -55,15 +82,17 @@ def make_synthesize_node(llm: LLMClient) -> Callable[[AgentState], AgentState]:
 
         metrics = state["metrics"]
         data = state["market_data"]
+        news = state.get("news", [])
+        rag_context = state.get("rag_context", [])
 
-        # Do modelu podajemy POLICZONE liczby. Prosimy go TYLKO o ocenę jakościową,
-        # nie o liczby — liczby dokładamy sami niżej (anty-halucynacja).
+        # Do modelu podajemy POLICZONE liczby + kontekst (newsy, RAG). Prosimy go
+        # TYLKO o ocenę jakościową, nie o liczby (anty-halucynacja).
         system = (
-            "Jesteś analitykiem akcji. Na podstawie podanych metryk wydaj zwięzłą, "
-            "ostrożną ocenę. Zwróć WYŁĄCZNIE JSON o kluczach: "
-            "recommendation (Pozytywna/Neutralna/Negatywna), rationale (1-3 zdania), "
-            "risks (lista 2-4 krótkich ryzyk). Nie podawaj żadnych liczb, których "
-            "nie ma w danych wejściowych."
+            "Jesteś analitykiem akcji. Na podstawie metryk ORAZ kontekstu (newsy, "
+            "fragmenty z bazy wiedzy) wydaj zwięzłą, ostrożną ocenę. Zwróć WYŁĄCZNIE "
+            "JSON o kluczach: recommendation (Pozytywna/Neutralna/Negatywna), "
+            "rationale (1-3 zdania), risks (lista 2-4 krótkich ryzyk). Nie podawaj "
+            "liczb, których nie ma w danych wejściowych."
         )
         user = json.dumps(
             {
@@ -72,18 +101,20 @@ def make_synthesize_node(llm: LLMClient) -> Callable[[AgentState], AgentState]:
                 "currency": data.currency,
                 "momentum_12_1": metrics.momentum_12_1,
                 "upside_vs_consensus": metrics.upside,
+                "news_titles": [n.title for n in news],
+                "rag_context": rag_context,
             },
             ensure_ascii=False,
         )
 
         raw = llm.complete_json(system, user)
 
-        # Składamy raport: część jakościowa od LLM, METRYKI z naszych obliczeń.
         report = Report(
             recommendation=str(raw.get("recommendation", "Neutralna")),
             rationale=str(raw.get("rationale", "")),
             risks=[str(r) for r in raw.get("risks", [])],
-            metrics=metrics,
+            metrics=metrics,                       # NASZE liczby, nie z LLM
+            news_used=[n.title for n in news],     # transparentność źródeł
         )
         return {"report": report}
 

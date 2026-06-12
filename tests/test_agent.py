@@ -26,7 +26,7 @@ def _market_data() -> MarketData:
 
 def test_router_sets_plan():
     out = router_node({"ticker": "TEST"})
-    assert out["plan"] == ["market_data", "metrics"]
+    assert out["plan"] == ["market_data", "metrics", "news", "rag?"]
 
 
 def test_metrics_node_computes_from_market_data():

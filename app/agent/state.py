@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.tools.market_data import MarketData
 from app.tools.metrics import Metrics
+from app.tools.news import NewsItem
 
 DISCLAIMER = (
     "To narzędzie analityczne i projekt edukacyjny, NIE porada inwestycyjna. "
@@ -39,6 +40,8 @@ class Report(BaseModel):
     rationale: str = Field(..., description="Uzasadnienie oparte o metryki i kontekst")
     risks: list[str] = Field(default_factory=list, description="Główne ryzyka")
     metrics: Metrics
+    # Tytuły newsów wykorzystanych jako kontekst — transparentność źródeł.
+    news_used: list[str] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER
 
 
@@ -49,5 +52,7 @@ class AgentState(TypedDict, total=False):
     plan: list[str]             # które narzędzia odpalić (ustawia router)
     market_data: MarketData     # dokłada węzeł market_data
     metrics: Metrics            # dokłada węzeł metrics
+    news: list[NewsItem]        # dokłada węzeł news
+    rag_context: list[str]      # dokłada węzeł rag (kontekst z bazy wektorowej)
     report: Report              # dokłada węzeł synthesize (wyjście)
     error: str                  # ustawiane, gdy coś pójdzie nie tak
