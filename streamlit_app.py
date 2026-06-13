@@ -74,11 +74,17 @@ tab_single, tab_compare = st.tabs(["🔍 Analiza spółki", "📊 Porównanie sp
 with tab_single:
     st.caption("Pełny raport: dane rynkowe → metryki → newsy → RAG → synteza LLM.")
 
+    single_universe = fetch_universe(api_url)
     col_in, col_btn = st.columns([3, 1])
-    ticker = col_in.text_input(
-        "Ticker spółki", value="AAPL", max_chars=10, label_visibility="collapsed",
-        placeholder="np. AAPL, MSFT, NVDA",
-    ).strip().upper()
+    picked = col_in.selectbox(
+        "Ticker spółki",
+        options=single_universe,
+        index=single_universe.index("AAPL") if "AAPL" in single_universe else 0,
+        accept_new_options=True,   # można też wpisać własny ticker spoza listy
+        label_visibility="collapsed",
+        placeholder="Wybierz lub wpisz ticker…",
+    )
+    ticker = (picked or "").strip().upper()
     analyze = col_btn.button("Analizuj", type="primary", use_container_width=True)
 
     if analyze and ticker:
