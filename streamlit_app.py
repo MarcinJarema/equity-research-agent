@@ -1,11 +1,15 @@
 """Streamlit UI — wizualny frontend nad API agenta.
 
-Architektura: UI (tu) -> HTTP POST /analyze -> agent LangGraph -> raport.
-UI jest CIENKIM klientem usługi — nie zna logiki agenta, tylko woła API. To ta
-sama separacja, którą pokazujesz na rozmowie: serwis + interfejs nad nim.
+Architektura: UI (tu) -> HTTP (FastAPI) -> agent / regułowy rating -> wynik.
+UI jest CIENKIM klientem usługi — nie zna logiki, tylko woła API. To ta sama
+separacja, którą pokazujesz na rozmowie: serwis + interfejs nad nim.
+
+Dwie zakładki:
+  • Analiza      — pełny raport LLM dla jednej spółki (POST /analyze),
+  • Porównanie   — regułowy rating Strong Buy/Buy/Hold/Sell dla wielu spółek (POST /compare).
 
 Uruchomienie:
-    1) API:  uvicorn app.main:app          (musi działać, domyślnie :8000)
+    1) API:  uvicorn app.main:app
     2) UI:   streamlit run streamlit_app.py
 """
 
@@ -14,11 +18,15 @@ from __future__ import annotations
 import os
 
 import httpx
+import pandas as pd
 import streamlit as st
 
 API_URL = os.getenv("ERA_API_URL", "http://127.0.0.1:8000")
 
-st.set_page_config(page_title="Equity Research Agent", page_icon="📈", layout="centered")
+RATING_ORDER = ["Strong Buy", "Buy", "Hold", "Sell"]
+RATING_COLOR = {"Strong Buy": "green", "Buy": "blue", "Hold": "orange", "Sell": "red"}
+
+st.set_page_config(page_title="Equity Research Agent", page_icon="📈", layout="wide")
 
 
 # --- Pasek boczny: konfiguracja + status API ---
@@ -32,73 +40,159 @@ with st.sidebar:
         st.error("API offline — uruchom:\n`uvicorn app.main:app`")
     st.divider()
     st.caption(
-        "UI → POST /analyze → agent LangGraph "
-        "(router → market_data → metrics → news → RAG → synteza LLM)."
+        "Analiza: UI → /analyze → agent LangGraph (LLM).\n\n"
+        "Porównanie: UI → /compare → regułowy rating (bez LLM)."
     )
 
 
-# --- Nagłówek ---
-st.title("📈 Equity Research Agent")
-st.caption("Agentowy raport spółki: dane rynkowe → metryki → newsy → RAG → synteza LLM.")
-
-col_in, col_btn = st.columns([3, 1])
-ticker = col_in.text_input(
-    "Ticker spółki", value="AAPL", max_chars=10, label_visibility="collapsed",
-    placeholder="np. AAPL, MSFT, NVDA",
-).strip().upper()
-analyze = col_btn.button("Analizuj", type="primary", use_container_width=True)
+@st.cache_data(ttl=300)
+def fetch_universe(url: str) -> list[str]:
+    """Domyślne uniwersum spółek z API (cache, by nie pytać co rerun)."""
+    try:
+        return httpx.get(f"{url}/universe", timeout=5).json()
+    except Exception:
+        return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"]
 
 
 def _pct(value: float | None) -> str:
     return f"{value * 100:.1f}%" if value is not None else "—"
 
 
-# --- Akcja: wywołanie API i render raportu ---
-if analyze and ticker:
-    with st.spinner(f"Analizuję {ticker}…"):
-        try:
-            resp = httpx.post(f"{api_url}/analyze", json={"ticker": ticker}, timeout=90)
-        except Exception as exc:
-            st.error(f"Nie udało się połączyć z API: {exc}")
+def _rev_label(negative: bool) -> str:
+    return "↓ negatywne" if negative else "–"
+
+
+st.title("📈 Equity Research Agent")
+
+tab_single, tab_compare = st.tabs(["🔍 Analiza spółki", "📊 Porównanie spółek"])
+
+
+# =========================== ZAKŁADKA: ANALIZA ===========================
+with tab_single:
+    st.caption("Pełny raport: dane rynkowe → metryki → newsy → RAG → synteza LLM.")
+
+    col_in, col_btn = st.columns([3, 1])
+    ticker = col_in.text_input(
+        "Ticker spółki", value="AAPL", max_chars=10, label_visibility="collapsed",
+        placeholder="np. AAPL, MSFT, NVDA",
+    ).strip().upper()
+    analyze = col_btn.button("Analizuj", type="primary", use_container_width=True)
+
+    if analyze and ticker:
+        with st.spinner(f"Analizuję {ticker}…"):
+            try:
+                resp = httpx.post(f"{api_url}/analyze", json={"ticker": ticker}, timeout=90)
+            except Exception as exc:
+                st.error(f"Nie udało się połączyć z API: {exc}")
+                st.stop()
+
+        if resp.status_code != 200:
+            st.error(f"Błąd {resp.status_code}: {resp.json().get('detail', resp.text)}")
             st.stop()
 
-    if resp.status_code != 200:
-        detail = resp.json().get("detail", resp.text)
-        st.error(f"Błąd {resp.status_code}: {detail}")
-        st.stop()
+        data = resp.json()
+        rec = data["recommendation"]
+        color = {"Pozytywna": "green", "Neutralna": "orange", "Negatywna": "red"}.get(rec, "gray")
+        st.markdown(f"## {ticker} — rekomendacja: :{color}[{rec}]")
 
-    data = resp.json()
+        m = data.get("metrics", {})
+        c1, c2 = st.columns(2)
+        c1.metric("Momentum 12-1", _pct(m.get("momentum_12_1")), delta=_pct(m.get("momentum_12_1")))
+        c2.metric("Upside vs konsensus", _pct(m.get("upside")), delta=_pct(m.get("upside")))
 
-    # Rekomendacja jako kolorowy nagłówek.
-    rec = data["recommendation"]
-    color = {"Pozytywna": "green", "Neutralna": "orange", "Negatywna": "red"}.get(rec, "gray")
-    st.markdown(f"## {ticker} — rekomendacja: :{color}[{rec}]")
+        st.markdown("### 🧠 Uzasadnienie")
+        st.info(data.get("rationale", "—"))
 
-    # Metryki: momentum i upside (delta koloruje się auto: + zielono, − czerwono).
-    m = data.get("metrics", {})
-    c1, c2 = st.columns(2)
-    c1.metric("Momentum 12-1", _pct(m.get("momentum_12_1")), delta=_pct(m.get("momentum_12_1")))
-    c2.metric("Upside vs konsensus", _pct(m.get("upside")), delta=_pct(m.get("upside")))
+        if data.get("risks"):
+            st.markdown("### ⚠️ Ryzyka")
+            for r in data["risks"]:
+                st.markdown(f"- {r}")
 
-    st.markdown("### 🧠 Uzasadnienie")
-    st.info(data.get("rationale", "—"))
+        if data.get("news_used"):
+            with st.expander(f"📰 Źródła — newsy ({len(data['news_used'])})"):
+                for n in data["news_used"]:
+                    st.markdown(f"- {n}")
 
-    risks = data.get("risks") or []
-    if risks:
-        st.markdown("### ⚠️ Ryzyka")
-        for r in risks:
-            st.markdown(f"- {r}")
+        with st.expander("🔧 Surowa odpowiedź API (JSON)"):
+            st.json(data)
 
-    news = data.get("news_used") or []
-    if news:
-        with st.expander(f"📰 Źródła — newsy ({len(news)})"):
-            for n in news:
-                st.markdown(f"- {n}")
+        st.warning(data.get("disclaimer", ""))
 
-    with st.expander("🔧 Surowa odpowiedź API (JSON)"):
-        st.json(data)
+    elif analyze and not ticker:
+        st.warning("Podaj ticker spółki.")
 
-    st.warning(data.get("disclaimer", ""))
 
-elif analyze and not ticker:
-    st.warning("Podaj ticker spółki.")
+# ========================== ZAKŁADKA: PORÓWNANIE ==========================
+with tab_compare:
+    st.caption(
+        "Regułowy rating dla wielu spółek naraz: momentum + upside + rewizje analityków. "
+        "**Negatywne rewizje od 2 miesięcy degradują ocenę.** Bez LLM — szybko i tanio."
+    )
+
+    universe = fetch_universe(api_url)
+    chosen = st.multiselect(
+        "Spółki do porównania", options=universe, default=universe,
+        help="Domyślnie zaznaczone wszystkie. Odznacz, by zawęzić.",
+    )
+    extra = st.text_input(
+        "Dodatkowe tickery (po przecinku)", value="", placeholder="np. INTC, NFLX",
+    )
+    compare = st.button("Porównaj", type="primary")
+
+    if compare:
+        tickers = list(chosen)
+        tickers += [t.strip().upper() for t in extra.split(",") if t.strip()]
+        if not tickers:
+            st.warning("Wybierz przynajmniej jedną spółkę.")
+            st.stop()
+
+        spinner_msg = f"Liczę rating dla {len(tickers)} spółek… (pobieranie danych może potrwać)"
+        with st.spinner(spinner_msg):
+            try:
+                resp = httpx.post(f"{api_url}/compare", json={"tickers": tickers}, timeout=180)
+            except Exception as exc:
+                st.error(f"Nie udało się połączyć z API: {exc}")
+                st.stop()
+
+        if resp.status_code != 200:
+            st.error(f"Błąd {resp.status_code}: {resp.json().get('detail', resp.text)}")
+            st.stop()
+
+        rows = resp.json()
+        ok_rows = [r for r in rows if r.get("rating")]
+        err_rows = [r for r in rows if r.get("error")]
+
+        # Pogrupowane, kolorowe kubełki — to jest sedno: które spółki w którym koszyku.
+        st.markdown("### Koszyki ratingowe")
+        cols = st.columns(4)
+        for col, rating in zip(cols, RATING_ORDER, strict=True):
+            bucket = [r["ticker"] for r in ok_rows if r["rating"] == rating]
+            with col:
+                st.markdown(f"#### :{RATING_COLOR[rating]}[{rating}]")
+                st.markdown(f"**{len(bucket)}**")
+                st.markdown("\n".join(f"- {t}" for t in bucket) if bucket else "_brak_")
+
+        # Tabela szczegółowa, posortowana wg ratingu (najlepsze u góry).
+        if ok_rows:
+            st.markdown("### Szczegóły")
+            df = pd.DataFrame(ok_rows)
+            df["_order"] = df["rating"].map({r: i for i, r in enumerate(RATING_ORDER)})
+            df = df.sort_values(["_order", "upside"], ascending=[True, False])
+            view = pd.DataFrame({
+                "Ticker": df["ticker"],
+                "Rating": df["rating"],
+                "Momentum 12-1": df["momentum_12_1"].map(_pct),
+                "Upside": df["upside"].map(_pct),
+                "Rewizje 2m": df["revisions_negative_2m"].map(_rev_label),
+            })
+            st.dataframe(view, use_container_width=True, hide_index=True)
+
+        if err_rows:
+            with st.expander(f"⚠️ Spółki z błędem ({len(err_rows)})"):
+                for r in err_rows:
+                    st.markdown(f"- **{r['ticker']}**: {r['error']}")
+
+        st.warning(
+            "Rating jest regułowy i edukacyjny — NIE porada inwestycyjna. "
+            "Nie podejmuj decyzji inwestycyjnych na tej podstawie."
+        )

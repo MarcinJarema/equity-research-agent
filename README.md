@@ -99,11 +99,28 @@ Po ingeście agent dla tych tickerów uruchomi ścieżkę z RAG.
 
 ---
 
+## Porównanie spółek (rating Strong Buy / Buy / Hold / Sell)
+
+Endpoint `POST /compare` liczy **regułowy** rating dla wielu spółek naraz
+(bez LLM → szybko i tanio), na podstawie trzech sygnałów: **upside** vs konsensus,
+**momentum 12-1** oraz **rewizji analityków** — pogorszenie konsensusu w ciągu
+ostatnich 2 miesięcy (negatywne rewizje) świadomie **degraduje** ocenę.
+
+```bash
+curl -s -X POST http://localhost:8000/compare \
+  -H "Content-Type: application/json" \
+  -d '{"tickers":["NVDA","KO","XOM"]}' | python3 -m json.tool
+# pusta lista tickerów => domyślne uniwersum (GET /universe)
+```
+
 ## Wizualizacja (Streamlit UI)
 
-Klikalny interfejs nad API — wpisz ticker, kliknij „Analizuj", zobacz raport
-(rekomendacja, metryki, uzasadnienie, ryzyka, źródła). UI jest cienkim klientem
-usługi: `UI → POST /analyze → agent`.
+Klikalny interfejs nad API, dwie zakładki:
+- **Analiza spółki** — pełny raport LLM dla jednego tickera (`POST /analyze`),
+- **Porównanie spółek** — wybór wielu (lub wszystkich) spółek, pogrupowanie w
+  koszyki Strong Buy / Buy / Hold / Sell + tabela z metrykami i flagą rewizji (`POST /compare`).
+
+UI jest cienkim klientem usługi: `UI → API → agent/rating`.
 
 ```bash
 pip install ".[ui]"

@@ -20,6 +20,10 @@ from app.core.observability import setup_observability
 from app.llm.client import get_llm_client
 from app.rag.embeddings import get_embedder
 from app.rag.store import VectorStore
+from app.tools.market_data import MarketDataError, get_market_data
+from app.tools.metrics import calc_metrics
+from app.tools.rating import classify_rating
+from app.tools.revisions import get_revision_trend
 
 # Budujemy agenta raz na proces. Zależności wybierane z .env; fabryki schodzą
 # do atrap (brak klucza LLM / brak modelu embeddingów), więc aplikacja zawsze wstaje.
@@ -55,6 +59,12 @@ app = FastAPI(
 # Dozwolony format tickera: litery/cyfry + kropka/myślnik (np. BRK.B, RDS-A), do 10 znaków.
 # Walidacja na wejściu zawęża, co trafia dalej do yfinance, bazy i promptu LLM.
 _TICKER_RE = re.compile(r"^[A-Za-z0-9.\-]{1,10}$")
+
+# Domyślne uniwersum do porównania (zróżnicowane sektory). UI pozwala wybrać podzbiór.
+DEFAULT_UNIVERSE = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA",
+    "JPM", "XOM", "KO", "PFE", "WMT", "DIS",
+]
 
 
 class AnalyzeRequest(BaseModel):
@@ -94,3 +104,60 @@ def analyze(req: AnalyzeRequest) -> Report:
     if report is None:
         raise HTTPException(status_code=502, detail="Agent nie zwrócił raportu.")
     return report
+
+
+# --- Porównanie wielu spółek (regułowy rating, bez LLM => szybkie i tanie) ---
+
+class CompareRequest(BaseModel):
+    tickers: list[str] = Field(
+        default_factory=list,
+        description="Lista tickerów. Puste => domyślne uniwersum (/universe).",
+    )
+
+
+class CompareRow(BaseModel):
+    ticker: str
+    rating: str | None = None
+    momentum_12_1: float | None = None
+    upside: float | None = None
+    revisions_negative_2m: bool = False
+    error: str | None = None
+
+
+@app.get("/universe")
+def universe() -> list[str]:
+    """Domyślna lista spółek do porównania (do zasilenia UI)."""
+    return DEFAULT_UNIVERSE
+
+
+@app.post("/compare", response_model=list[CompareRow])
+def compare(req: CompareRequest) -> list[CompareRow]:
+    """Liczy regułowy rating (Strong Buy/Buy/Hold/Sell) dla wielu spółek naraz."""
+    tickers = req.tickers or DEFAULT_UNIVERSE
+    rows: list[CompareRow] = []
+
+    for raw in tickers:
+        ticker = raw.strip().upper()
+        if not _TICKER_RE.match(ticker):
+            rows.append(CompareRow(ticker=ticker, error="nieprawidłowy ticker"))
+            continue
+        try:
+            data = get_market_data(ticker)
+            metrics = calc_metrics(data)
+            trend = get_revision_trend(ticker)
+            rating = classify_rating(metrics.upside, metrics.momentum_12_1, trend.negative_2m)
+            rows.append(
+                CompareRow(
+                    ticker=ticker,
+                    rating=rating,
+                    momentum_12_1=metrics.momentum_12_1,
+                    upside=metrics.upside,
+                    revisions_negative_2m=trend.negative_2m,
+                )
+            )
+        except MarketDataError as exc:
+            rows.append(CompareRow(ticker=ticker, error=str(exc)))
+        except Exception as exc:  # noqa: BLE001 — pojedyncza spółka nie wywala całego porównania
+            rows.append(CompareRow(ticker=ticker, error=f"błąd: {exc}"))
+
+    return rows
