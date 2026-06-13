@@ -108,6 +108,17 @@ class VectorStore:
             conn.execute("CREATE INDEX IF NOT EXISTS documents_ticker_idx ON documents (ticker)")
             conn.commit()
 
+    def delete_ticker(self, ticker: str) -> int:
+        """Usuwa wszystkie chunki tickera. Zwraca liczbę usuniętych wierszy.
+
+        Pozwala robić ingest idempotentnie: zastępujemy stary kontekst świeżym,
+        zamiast dokładać duplikaty przy każdym ponownym uruchomieniu.
+        """
+        with self._get_pool().connection() as conn:
+            cur = conn.execute("DELETE FROM documents WHERE ticker = %s", (ticker,))
+            conn.commit()
+            return cur.rowcount
+
     def add_chunks(self, chunks: list[Chunk]) -> int:
         """Wstawia chunki. Zwraca liczbę dodanych wierszy."""
         if not chunks:

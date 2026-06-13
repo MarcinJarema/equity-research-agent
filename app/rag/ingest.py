@@ -86,6 +86,8 @@ def ingest_ticker(ticker: str, store: VectorStore, embedder: Embedder) -> int:
     """Pełny ingest dla tickera: schemat -> chunki -> zapis. Zwraca liczbę chunków."""
     # Wymiar tabeli bierzemy z embeddera => tabela zawsze pasuje do modelu.
     store.init_schema(embedder.dim)
+    # Idempotentnie: usuwamy poprzedni kontekst tickera, by nie mnożyć duplikatów.
+    store.delete_ticker(ticker.upper())
     chunks = build_chunks(ticker, embedder)
     return store.add_chunks(chunks)
 
