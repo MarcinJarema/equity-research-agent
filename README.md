@@ -99,6 +99,20 @@ Po ingeście agent dla tych tickerów uruchomi ścieżkę z RAG.
 
 ---
 
+## Wizualizacja (Streamlit UI)
+
+Klikalny interfejs nad API — wpisz ticker, kliknij „Analizuj", zobacz raport
+(rekomendacja, metryki, uzasadnienie, ryzyka, źródła). UI jest cienkim klientem
+usługi: `UI → POST /analyze → agent`.
+
+```bash
+pip install ".[ui]"
+uvicorn app.main:app --reload        # 1) API (osobny terminal)
+streamlit run streamlit_app.py       # 2) UI → http://localhost:8501
+```
+
+Adres API można nadpisać zmienną `ERA_API_URL` (np. gdy API działa w Dockerze).
+
 ## Uruchomienie lokalne (bez Dockera)
 
 ```bash

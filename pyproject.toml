@@ -42,6 +42,10 @@ rag = [
     "pgvector>=0.3",
     "sentence-transformers>=3.0",
 ]
+# Wizualny frontend (Streamlit) — cienki klient nad API /analyze.
+ui = [
+    "streamlit>=1.30",
+]
 # Narzędzia deweloperskie.
 dev = [
     "pytest>=8.0",
