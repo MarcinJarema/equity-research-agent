@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+import altair as alt
 import httpx
 import pandas as pd
 import streamlit as st
@@ -25,6 +26,8 @@ API_URL = os.getenv("ERA_API_URL", "http://127.0.0.1:8000")
 
 RATING_ORDER = ["Strong Buy", "Buy", "Hold", "Sell"]
 RATING_COLOR = {"Strong Buy": "green", "Buy": "blue", "Hold": "orange", "Sell": "red"}
+# Paleta hex dla wykresu (Altair) — w kolejności RATING_ORDER.
+RATING_HEX = ["#2e7d32", "#1565c0", "#ef6c00", "#c62828"]
 
 st.set_page_config(page_title="Equity Research Agent", page_icon="📈", layout="wide")
 
@@ -172,12 +175,45 @@ with tab_compare:
                 st.markdown(f"**{len(bucket)}**")
                 st.markdown("\n".join(f"- {t}" for t in bucket) if bucket else "_brak_")
 
-        # Tabela szczegółowa, posortowana wg ratingu (najlepsze u góry).
         if ok_rows:
-            st.markdown("### Szczegóły")
             df = pd.DataFrame(ok_rows)
             df["_order"] = df["rating"].map({r: i for i, r in enumerate(RATING_ORDER)})
             df = df.sort_values(["_order", "upside"], ascending=[True, False])
+
+            # Słupki porównawcze, kolorowane wg ratingu. Przełącznik metryki.
+            st.markdown("### Wykres porównawczy")
+            metric_label = st.radio(
+                "Metryka",
+                ["Upside", "Momentum 12-1"],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+            field = "upside" if metric_label == "Upside" else "momentum_12_1"
+            chart_df = df[["ticker", "rating"]].copy()
+            chart_df["wartość"] = pd.to_numeric(df[field], errors="coerce") * 100  # w %
+            chart = (
+                alt.Chart(chart_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("ticker:N", sort="-y", title="Spółka"),
+                    y=alt.Y("wartość:Q", title=f"{metric_label} [%]"),
+                    color=alt.Color(
+                        "rating:N",
+                        scale=alt.Scale(domain=RATING_ORDER, range=RATING_HEX),
+                        title="Rating",
+                    ),
+                    tooltip=[
+                        alt.Tooltip("ticker:N", title="Spółka"),
+                        alt.Tooltip("rating:N", title="Rating"),
+                        alt.Tooltip("wartość:Q", title=metric_label, format=".1f"),
+                    ],
+                )
+                .properties(height=360)
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+            # Tabela szczegółowa, posortowana wg ratingu (najlepsze u góry).
+            st.markdown("### Szczegóły")
             view = pd.DataFrame({
                 "Ticker": df["ticker"],
                 "Rating": df["rating"],
